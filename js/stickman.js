@@ -223,7 +223,8 @@ export class Stickman {
     const torsoBot = addPoint(cx, torsoBotY, 1.2);
 
     const neck = addPoint(cx, torsoTopY - neckLength, 0.6);
-    const head = addPoint(cx, neck.y - headRadius * 1.5, 0.8);
+    const neckPoint = points[neck];
+    const head = addPoint(cx, neckPoint.y - headRadius * 1.5, 0.8);
 
     const shoulderY = torsoTopY + headRadius * 0.25;
     const hipY = torsoBotY;
@@ -231,20 +232,28 @@ export class Stickman {
     const shoulderL = addPoint(cx - shoulderWidth / 2, shoulderY, 0.9);
     const shoulderR = addPoint(cx + shoulderWidth / 2, shoulderY, 0.9);
 
-    const elbowL = addPoint(shoulderL.x - headRadius * 0.2, shoulderY + upperArm, 0.7);
-    const elbowR = addPoint(shoulderR.x + headRadius * 0.2, shoulderY + upperArm, 0.7);
+    const shoulderLPoint = points[shoulderL];
+    const shoulderRPoint = points[shoulderR];
+    const elbowL = addPoint(shoulderLPoint.x - headRadius * 0.2, shoulderY + upperArm, 0.7);
+    const elbowR = addPoint(shoulderRPoint.x + headRadius * 0.2, shoulderY + upperArm, 0.7);
 
-    const handL = addPoint(elbowL.x - headRadius * 0.2, elbowL.y + forearm, 0.7);
-    const handR = addPoint(elbowR.x + headRadius * 0.2, elbowR.y + forearm, 0.7);
+    const elbowLPoint = points[elbowL];
+    const elbowRPoint = points[elbowR];
+    const handL = addPoint(elbowLPoint.x - headRadius * 0.2, elbowLPoint.y + forearm, 0.7);
+    const handR = addPoint(elbowRPoint.x + headRadius * 0.2, elbowRPoint.y + forearm, 0.7);
 
     const hipL = addPoint(cx - hipWidth / 2, hipY, 1.0);
     const hipR = addPoint(cx + hipWidth / 2, hipY, 1.0);
 
-    const kneeL = addPoint(hipL.x - headRadius * 0.1, hipY + upperLeg, 0.9);
-    const kneeR = addPoint(hipR.x + headRadius * 0.1, hipY + upperLeg, 0.9);
+    const hipLPoint = points[hipL];
+    const hipRPoint = points[hipR];
+    const kneeL = addPoint(hipLPoint.x - headRadius * 0.1, hipY + upperLeg, 0.9);
+    const kneeR = addPoint(hipRPoint.x + headRadius * 0.1, hipY + upperLeg, 0.9);
 
-    const footL = addPoint(kneeL.x - headRadius * 0.1, floor, 1.1);
-    const footR = addPoint(kneeR.x + headRadius * 0.1, floor, 1.1);
+    const kneeLPoint = points[kneeL];
+    const kneeRPoint = points[kneeR];
+    const footL = addPoint(kneeLPoint.x - headRadius * 0.1, floor, 1.1);
+    const footR = addPoint(kneeRPoint.x + headRadius * 0.1, floor, 1.1);
 
     this.points = points;
     this.constraints = [];
