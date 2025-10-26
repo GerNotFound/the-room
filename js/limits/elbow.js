@@ -1,1 +1,0 @@
-import { limitAngle } from '../core/angles.js';export function enforceElbowLimits(points, armL, armR){limitAngle(points, armL.shoulder, armL.elbow, armL.hand, 25, 160, 0.28, 1.2);limitAngle(points, armR.shoulder, armR.elbow, armR.hand, 25, 160, 0.28, 1.2);}
