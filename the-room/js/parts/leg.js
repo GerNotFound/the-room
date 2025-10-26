@@ -1,1 +1,0 @@
-export function buildLeg(points, hipX, hipY, upperLen, lowerLen){const iHip=points.push({x:hipX,y:hipY,px:hipX,py:hipY,m:1,fx:0,fy:0})-1;const iKnee=points.push({x:hipX,y:hipY+upperLen,px:hipX,py:hipY+upperLen,m:1,fx:0,fy:0})-1;const iFoot=points.push({x:hipX,y:hipY+upperLen+lowerLen,px:hipX,py:hipY+upperLen+lowerLen,m:1,fx:0,fy:0})-1;return { hip:iHip, knee:iKnee, foot:iFoot };}
