@@ -1,0 +1,1 @@
+import { limitAngle } from '../core/angles.js';export function enforceNeckLimits(points, head, torso){limitAngle(points, head.head, torso.torsoTop, torso.torsoBot, 70, 140, 0.25, 1.0);}
