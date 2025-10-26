@@ -43,7 +43,7 @@ export class Stickman {
     this.drag = {
       index: -1,
     };
-    this.gravity = 6600;
+    this.gravity = 13200;
     this.lastAction = performance.now();
     this.stand = {
       active: false,
@@ -91,8 +91,13 @@ export class Stickman {
     }
     const dt = 1 / 60;
     const p = this.points[this.drag.index];
-    p.px = p.x - vx * dt;
-    p.py = p.y - vy * dt;
+    const impulseX = vx * dt;
+    const impulseY = vy * dt;
+    p.px = p.x;
+    p.py = p.y;
+    p.px -= impulseX;
+    p.py -= impulseY;
+    this._distributeMomentum(this.drag.index, impulseX, impulseY);
     this.drag.index = -1;
     this.notifyUserAction();
   }
@@ -125,6 +130,32 @@ export class Stickman {
     return bestDistance <= grabRange ? bestIndex : -1;
   }
 
+  _distributeMomentum(sourceIndex, impulseX, impulseY) {
+    const source = this.points[sourceIndex];
+    if (!source) {
+      return;
+    }
+    const falloff = Math.max(this.render.headRadius * 6, 1);
+    const falloffSq = falloff * falloff;
+
+    for (let i = 0; i < this.points.length; i++) {
+      if (i === sourceIndex || i === this.drag.index) {
+        continue;
+      }
+      const point = this.points[i];
+      const dx = point.x - source.x;
+      const dy = point.y - source.y;
+      const distSq = dx * dx + dy * dy;
+      let influence = 1;
+      if (falloffSq > 0) {
+        const ratio = Math.min(1, distSq / falloffSq);
+        influence = 0.65 + (1 - ratio) * 0.35;
+      }
+      point.px -= impulseX * influence;
+      point.py -= impulseY * influence;
+    }
+  }
+
   simulate(dt, room) {
     if (!this.points.length) {
       return;
@@ -140,6 +171,7 @@ export class Stickman {
       this._applyBounds(room);
       this._applyFriction(room);
       this._limitVelocity(room);
+      this._stabilizeVelocities(room);
       this._standAssist(room, subDt);
     }
   }
@@ -321,7 +353,7 @@ export class Stickman {
     };
 
     this.bindPose = this.points.map((p) => ({ x: p.x, y: p.y }));
-    this.gravity = Math.max(3300, height * 165);
+    this.gravity = Math.max(13200, height * 660);
     this._cancelStand();
   }
 
@@ -439,6 +471,23 @@ export class Stickman {
         const scale = maxSpeed / (speed + 1e-6);
         p.px = p.x - vx * scale;
         p.py = p.y - vy * scale;
+      }
+    }
+  }
+
+  _stabilizeVelocities(room) {
+    const tolerance = Math.max(0.08, Math.max(room.w, room.h) * 0.00045);
+    const toleranceSq = tolerance * tolerance;
+    for (let i = 0; i < this.points.length; i++) {
+      if (i === this.drag.index) {
+        continue;
+      }
+      const p = this.points[i];
+      const dx = p.x - p.px;
+      const dy = p.y - p.py;
+      if (dx * dx + dy * dy <= toleranceSq) {
+        p.px = p.x;
+        p.py = p.y;
       }
     }
   }
