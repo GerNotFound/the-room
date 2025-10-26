@@ -1,0 +1,1 @@
+import { limitAngle } from '../core/angles.js';export function enforceKneeLimits(points, legL, legR){limitAngle(points, legL.hip, legL.knee, legL.foot, 25, 165, 0.28, 1.2);limitAngle(points, legR.hip, legR.knee, legR.foot, 25, 165, 0.28, 1.2);}

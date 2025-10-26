@@ -1,0 +1,1 @@
+export function jointShoulders(sticks, torso, armL, armR, shoulderW){sticks.push({i:armL.shoulder,j:torso.torsoTop,len:shoulderW*0.55});sticks.push({i:armR.shoulder,j:torso.torsoTop,len:shoulderW*0.55});sticks.push({i:armL.shoulder,j:armR.shoulder,len:shoulderW});}

@@ -1,0 +1,1 @@
+export function buildTorso(points, cx, cy, torsoLen){const iTop=points.push({x:cx,y:cy - torsoLen/2,px:cx,py:cy - torsoLen/2,m:1,fx:0,fy:0})-1;const iBot=points.push({x:cx,y:cy + torsoLen/2,px:cx,py:cy + torsoLen/2,m:1,fx:0,fy:0})-1;return { torsoTop:iTop, torsoBot:iBot };}
