@@ -52,6 +52,7 @@ export class Stickman {
     this._HIT_TH = 18;
 
     this.sleep = { active:false, calmFrames:0 };
+    this.postDragFrames = 0;
   }
 
   init(room){ this._build(room); }
@@ -74,6 +75,7 @@ export class Stickman {
     const dt = 1/60;
     pt.px = pt.x - vx * dt; pt.py = pt.y - vy * dt;
     this.grabbedIndex = -1; this.dragging = false;
+    this.postDragFrames = Math.max(this.postDragFrames, 10);
   }
   nearestGrab(x,y){
     let best=-1, bestD=Infinity;
@@ -96,16 +98,19 @@ export class Stickman {
     const targetStep = 0.009;
     const steps = Math.max(1, Math.ceil(dt / targetStep));
     const sdt = dt / steps;
-    const maxD = room.h * this.params.maxStepFrac;
-    const corrCap = room.h * this.params.corrCapFrac;
+    const relaxing = !this.dragging && this.postDragFrames > 0;
+    const afterDrag = this.dragging || relaxing;
+    const maxD = room.h * this.params.maxStepFrac * (afterDrag ? 2.6 : 1);
+    const corrCapBase = room.h * this.params.corrCapFrac;
+    const corrCap = afterDrag ? corrCapBase * 4.0 : corrCapBase;
 
     for (let n=0; n<steps; n++){
       integrate(this.points, sdt, this.gravity, this.params.airPerSec, this.params.airQuad, maxD, this.dragging ? this.grabbedIndex : -1);
       applyBounds(this.points, room, this.params.restitution, this.params.friction);
       this._decayContacts();
 
-      const iters = this.params.iterations + (this.stand.active ? this.params.standIterations : 0);
-      const stiff = this.stand.active ? 0.9 : 0.68;
+      const iters = this.params.iterations + (this.stand.active ? this.params.standIterations : 0) + (afterDrag ? 4 : 0);
+      const stiff = this.stand.active ? 0.9 : afterDrag ? 0.82 : 0.68;
       solveSticks(this.points, this.sticks, iters, stiff, this.dragging ? this.grabbedIndex : -1, corrCap);
 
       dampRotationsAngle(this.points, this.sticks, this.params.rotDampK, this.params.rotCap);
@@ -114,11 +119,16 @@ export class Stickman {
       this._angleLimits();
 
       this._selfCollisions(room, corrCap);
-      this._postDamp(room);
+      let groundStable = this._isOnGroundStable(room);
+      this._postDamp(room, groundStable);
+      groundStable = this._isOnGroundStable(room);
 
-      this._runStandAssist(room);
-      this._sleepCheck();
+      this._runStandAssist(room, groundStable);
+      this._sleepCheck(room, groundStable);
       this._sanitize(room);
+    }
+    if (this.postDragFrames > 0 && !this.dragging){
+      this.postDragFrames = Math.max(0, this.postDragFrames - 1);
     }
   }
 
@@ -137,12 +147,21 @@ export class Stickman {
     this._line(ctx, P(r.shL), P(r.shR), Math.max(1, L*0.7));
     this._line(ctx, P(r.hipL), P(r.hipR), Math.max(1, L*0.7));
     this._line(ctx, P(r.torsoTop), {x:P(r.torsoTop).x, y:P(r.torsoTop).y - this.metrics.headR*0.4}, Math.max(1, L*0.7));
-    this._circle(ctx, P(r.head).x, P(r.head).y, r.headR, Math.max(1, L));
-    const eyeR = Math.max(1, Math.round(r.headR*0.1));
-    const eyeDx = r.headR*0.45;
-    const eyeY = P(r.head).y - r.headR*0.2;
-    this._dot(ctx, P(r.head).x - eyeDx, eyeY, eyeR);
-    this._dot(ctx, P(r.head).x + eyeDx, eyeY, eyeR);
+    const head = P(r.head);
+    this._circle(ctx, head.x, head.y, r.headR, Math.max(1, L));
+    const face = r.face;
+    const eyeY = head.y - face.eyeOffsetY;
+    this._dot(ctx, head.x - face.eyeOffsetX, eyeY, face.eyeR);
+    this._dot(ctx, head.x + face.eyeOffsetX, eyeY, face.eyeR);
+    ctx.beginPath();
+    ctx.lineWidth = face.noseThickness;
+    ctx.moveTo(head.x - face.noseLen/2, head.y);
+    ctx.lineTo(head.x + face.noseLen/2, head.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.lineWidth = face.mouthThickness;
+    ctx.arc(head.x + face.mouthOffsetX, head.y + face.mouthOffsetY, face.mouthRadius, -0.65*Math.PI, 0.65*Math.PI);
+    ctx.stroke();
   }
 
   _build(room){
@@ -151,6 +170,7 @@ export class Stickman {
     this.render = {};
     this.metrics = {};
     this._cancelStand();
+    this.postDragFrames = 0;
 
     const cx = room.x + room.w/2;
     const cy = room.y + room.h/2 - room.h*0.1;
@@ -185,6 +205,18 @@ export class Stickman {
     jointAnkles(this.sticks, legL, legR, lowerLeg);
     addStabilizers(this.points, this.sticks, torsoIdx, armL, armR, legL, legR, upperLeg, lowerLeg);
 
+    const face = {
+      eyeOffsetX: headR * 0.48,
+      eyeOffsetY: headR * 0.25,
+      eyeR: Math.max(1, Math.round(headR * 0.12)),
+      noseLen: Math.max(2, Math.round(headR * 0.45)),
+      noseThickness: Math.max(1, Math.round(headR * 0.07)),
+      mouthOffsetX: headR * 0.35,
+      mouthOffsetY: headR * 0.25,
+      mouthRadius: Math.max(2, Math.round(headR * 0.7)),
+      mouthThickness: Math.max(1, Math.round(headR * 0.09))
+    };
+
     this.render = {
       head: headIdx.head, headR,
       torsoTop: torsoIdx.torsoTop, torsoBot: torsoIdx.torsoBot,
@@ -192,7 +224,8 @@ export class Stickman {
       shR: armR.shoulder, elbR: armR.elbow, handR: armR.hand,
       hipL: legL.hip, kneeL: legL.knee, footL: legL.foot,
       hipR: legR.hip, kneeR: legR.knee, footR: legR.foot,
-      line: Math.max(2, Math.round(room.h*0.006 * SCALE*1.2))
+      line: Math.max(2, Math.round(room.h*0.006 * SCALE*1.2)),
+      face
     };
 
     // masse/densità
@@ -244,11 +277,18 @@ export class Stickman {
   }
 
   _isOnGroundStable(room){
-    const r=this.render, floor = room.y+room.h-room.stroke-1, eps=2.0;
-    const fL=this.points[r.footL], fR=this.points[r.footR];
-    const contact = (floor - fL.y) <= eps && (floor - fR.y) <= eps;
-    const calm = Math.abs(fL.y - fL.py) < 0.8 && Math.abs(fR.y - fR.py) < 0.8;
-    return contact && calm;
+    const r=this.render, floor = room.y+room.h-room.stroke-1;
+    const eps = Math.max(2.0, this.metrics.headR * 0.18);
+    const checkIds = [r.footL, r.footR, r.kneeL, r.kneeR, r.hipL, r.hipR, r.torsoBot];
+    let contacts = 0;
+    let calm = true;
+    for (const id of checkIds){
+      const p = this.points[id];
+      if (!p) continue;
+      if (floor - p.y <= eps) contacts++;
+      if (Math.abs(p.y - p.py) > 1.1 || Math.abs(p.x - p.px) > 1.1) calm = false;
+    }
+    return contacts >= 2 && calm;
   }
   _uprightEnough(){
     const r=this.render, m=this.metrics, P=i=>this.points[i];
@@ -260,14 +300,16 @@ export class Stickman {
   }
   _cancelStand(){ this.stand.active=false; this.stand.alpha=0; }
 
-  _runStandAssist(room){
+  _runStandAssist(room, groundStable){
     const t=performance.now();
     if (this.dragging || this.grabbedIndex!==-1){ this._cancelStand(); return; }
     if (t - this.lastUserMs < 400) return;
     if (t - this.stand.lastEnd < this.stand.cooldownMs) return;
 
+    const stable = groundStable !== undefined ? groundStable : this._isOnGroundStable(room);
+
     if (!this.stand.active){
-      if (this._isOnGroundStable(room) && !this._uprightEnough()){
+      if (stable && !this._uprightEnough()){
         this.stand.active=true; this.stand.alpha=0; this.stand.t0=t;
         for (const p of this.points){ p.px=p.x; p.py=p.y; }
       } else return;
@@ -301,13 +343,15 @@ export class Stickman {
     const tTop=this.points[r.torsoTop], tBot=this.points[r.torsoBot];
     const midX=(tTop.x+tBot.x)/2; tTop.x += (midX-tTop.x)*0.12*this.stand.alpha; tBot.x += (midX-tBot.x)*0.12*this.stand.alpha;
 
+    this._freezeVelocities(0.6 * this.stand.alpha);
+
     if (this._uprightEnough() && this.stand.alpha>=0.99){
       this.stand.active=false; this.stand.lastEnd=t;
       for (const p of this.points){ p.px=p.x; p.py=p.y; }
     }
   }
 
-  _sleepCheck(){
+  _sleepCheck(room, groundStable){
     if (this.dragging) { this._wake(); return; }
     let v=0, angSum=0;
     for (const st of this.sticks){
@@ -324,10 +368,13 @@ export class Stickman {
     for (const p of this.points){ v += Math.hypot(p.x-p.px, p.y-p.py); }
     v /= this.points.length || 1;
     angSum /= this.sticks.length || 1;
-    if (v < 0.08 && angSum < 0.025){ this.sleep.calmFrames++; } else { this._wake(); }
-    if (this.sleep.calmFrames > 18){
+    if (v < 0.065 && angSum < 0.020){ this.sleep.calmFrames++; } else { this._wake(); }
+    if (this.sleep.calmFrames > 14){
+      if (!this._uprightEnough() && this._hasFloorContact(room)){
+        this._beginStandAssist(room, groundStable);
+      }
       this.sleep.active=true;
-      for (const p of this.points){ p.px=p.x; p.py=p.y; }
+      this._freezeVelocities(1);
     }
   }
   _wake(){ this.sleep.active=false; this.sleep.calmFrames=0; }
@@ -348,15 +395,52 @@ export class Stickman {
   _blend(i,tx,ty,a){ const p=this.points[i]; p.x += (tx-p.x)*a; p.y += (ty-p.y)*a; const vx=p.x-p.px, vy=p.y-p.py; p.px=p.x - vx*0.2; p.py=p.y - vy*0.2; }
 
   _decayContacts(){ for (const p of this.points){ if ((p.contactT|0) > 0) p.contactT = (p.contactT|0) - 1; else p.contactT = 0; } }
-  _postDamp(room){
-    const k = 0.98;
+  _postDamp(room, groundStable){
+    const resting = !this.dragging && this.grabbedIndex === -1 && (groundStable || this.sleep.active);
+    const k = this.sleep.active ? 0.82 : resting ? 0.88 : 0.97;
     for (const p of this.points){
       const vx = p.x - p.px, vy = p.y - p.py;
-      const maxV = room.h*0.035;
+      const maxV = room.h*(this.sleep.active || resting ? 0.02 : 0.035);
       let spd = Math.hypot(vx, vy);
       let nx=vx, ny=vy;
       if (spd > maxV){ const c = maxV/(spd+1e-6); nx*=c; ny*=c; spd = maxV; }
       p.px = p.x - nx*k; p.py = p.y - ny*k;
     }
+    if (resting && this._uprightEnough()){
+      this._freezeVelocities(0.5);
+    }
+  }
+
+  _freezeVelocities(strength=1){
+    const k = clamp(strength, 0, 1);
+    for (const p of this.points){
+      const vx = p.x - p.px;
+      const vy = p.y - p.py;
+      p.px = p.x - vx*(1-k);
+      p.py = p.y - vy*(1-k);
+    }
+  }
+
+  _hasFloorContact(room){
+    const floor = room.y+room.h-room.stroke-1;
+    const eps = Math.max(2.5, this.metrics.headR * 0.2);
+    const ids = [this.render.footL, this.render.footR, this.render.kneeL, this.render.kneeR, this.render.hipL, this.render.hipR];
+    for (const id of ids){
+      const p = this.points[id];
+      if (p && floor - p.y <= eps) return true;
+    }
+    return false;
+  }
+
+  _beginStandAssist(room, groundStable){
+    if (this.stand.active) return;
+    const stable = groundStable !== undefined ? groundStable : this._isOnGroundStable(room);
+    if (!stable) return;
+    this.stand.active = true;
+    this.stand.alpha = 0;
+    const t = performance.now();
+    this.stand.t0 = t;
+    this.stand.lastEnd = t - this.stand.cooldownMs;
+    for (const p of this.points){ p.px=p.x; p.py=p.y; }
   }
 }
