@@ -137,12 +137,21 @@ export class Stickman {
     this._line(ctx, P(r.shL), P(r.shR), Math.max(1, L*0.7));
     this._line(ctx, P(r.hipL), P(r.hipR), Math.max(1, L*0.7));
     this._line(ctx, P(r.torsoTop), {x:P(r.torsoTop).x, y:P(r.torsoTop).y - this.metrics.headR*0.4}, Math.max(1, L*0.7));
-    this._circle(ctx, P(r.head).x, P(r.head).y, r.headR, Math.max(1, L));
-    const eyeR = Math.max(1, Math.round(r.headR*0.1));
-    const eyeDx = r.headR*0.45;
-    const eyeY = P(r.head).y - r.headR*0.2;
-    this._dot(ctx, P(r.head).x - eyeDx, eyeY, eyeR);
-    this._dot(ctx, P(r.head).x + eyeDx, eyeY, eyeR);
+    const head = P(r.head);
+    this._circle(ctx, head.x, head.y, r.headR, Math.max(1, L));
+    const face = r.face;
+    const eyeY = head.y - face.eyeOffsetY;
+    this._dot(ctx, head.x - face.eyeOffsetX, eyeY, face.eyeR);
+    this._dot(ctx, head.x + face.eyeOffsetX, eyeY, face.eyeR);
+    ctx.beginPath();
+    ctx.lineWidth = face.noseThickness;
+    ctx.moveTo(head.x - face.noseLen/2, head.y);
+    ctx.lineTo(head.x + face.noseLen/2, head.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.lineWidth = face.mouthThickness;
+    ctx.arc(head.x + face.mouthOffsetX, head.y + face.mouthOffsetY, face.mouthRadius, -0.65*Math.PI, 0.65*Math.PI);
+    ctx.stroke();
   }
 
   _build(room){
@@ -185,6 +194,18 @@ export class Stickman {
     jointAnkles(this.sticks, legL, legR, lowerLeg);
     addStabilizers(this.points, this.sticks, torsoIdx, armL, armR, legL, legR, upperLeg, lowerLeg);
 
+    const face = {
+      eyeOffsetX: headR * 0.48,
+      eyeOffsetY: headR * 0.25,
+      eyeR: Math.max(1, Math.round(headR * 0.12)),
+      noseLen: Math.max(2, Math.round(headR * 0.45)),
+      noseThickness: Math.max(1, Math.round(headR * 0.07)),
+      mouthOffsetX: headR * 0.35,
+      mouthOffsetY: headR * 0.25,
+      mouthRadius: Math.max(2, Math.round(headR * 0.7)),
+      mouthThickness: Math.max(1, Math.round(headR * 0.09))
+    };
+
     this.render = {
       head: headIdx.head, headR,
       torsoTop: torsoIdx.torsoTop, torsoBot: torsoIdx.torsoBot,
@@ -192,7 +213,8 @@ export class Stickman {
       shR: armR.shoulder, elbR: armR.elbow, handR: armR.hand,
       hipL: legL.hip, kneeL: legL.knee, footL: legL.foot,
       hipR: legR.hip, kneeR: legR.knee, footR: legR.foot,
-      line: Math.max(2, Math.round(room.h*0.006 * SCALE*1.2))
+      line: Math.max(2, Math.round(room.h*0.006 * SCALE*1.2)),
+      face
     };
 
     // masse/densità

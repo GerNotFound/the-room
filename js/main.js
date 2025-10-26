@@ -4,10 +4,23 @@ const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d', { alpha: false });
 let DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
 
+const DEFAULT_PHRASES = [
+  'Ma seriamente?',
+  'Ehi! Ho le ossa fragili.',
+  'Smettila di strattonarmi.',
+  'Ancora tu?',
+  'Au! Con calma!',
+  'Non sono un giocattolo.',
+  'Uff…',
+  'Mi stavi disturbando.',
+  'Basta toccarmi!',
+  'Che fastidio!'
+];
+
 const state = {
   room: { x:0, y:0, w:0, h:0, stroke:0 },
   lastT: 0,
-  phrases: ["Hey"],
+  phrases: [...DEFAULT_PHRASES],
   msg: { text:'', until:0, x:0, y:0 },
   input: { pointerId:null, holdTimer:null, HOLD_MS:120, dragging:false, lastPX:0, lastPY:0, lastPT:0, vPX:0, vPY:0 }
 };
@@ -50,8 +63,8 @@ function canvasPoint(e) {
   return { x: e.clientX - r.left, y: e.clientY - r.top, t: e.timeStamp || performance.now() };
 }
 function speakAt(x,y){
-  const list = state.phrases.length ? state.phrases : ["Hey"];
-  const text = (list[(Math.random()*list.length)|0] || "Hey").trim();
+  const list = state.phrases.length ? state.phrases : DEFAULT_PHRASES;
+  const text = (list[(Math.random()*list.length)|0] || DEFAULT_PHRASES[0]).trim();
   state.msg = { text, until: performance.now()+1100, x, y };
   if (navigator.vibrate) navigator.vibrate(12);
 }
