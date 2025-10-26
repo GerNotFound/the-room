@@ -127,7 +127,8 @@ export class Stickman {
       }
     }
 
-    return bestDistance <= this.render.headRadius ? bestIndex : -1;
+    const grabRange = this.render.headRadius * 1.15;
+    return bestDistance <= grabRange ? bestIndex : -1;
   }
 
   simulate(dt, room) {
