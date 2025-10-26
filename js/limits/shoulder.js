@@ -1,1 +1,0 @@
-import { limitAngle } from '../core/angles.js';export function enforceShoulderLimits(points, torso, armL, armR){limitAngle(points, armL.shoulder, torso.torsoTop, armR.shoulder, 50, 170, 0.22, 1.0);}
