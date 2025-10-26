@@ -1,39 +1,33 @@
-const TAU = Math.PI * 2;
+import { SkeletonBuilder } from './skeleton/builder.js';
+import {
+  TAU,
+  clamp,
+  distance,
+  segmentDistance,
+  lerp,
+  easeOutCubic,
+} from './utils/math.js';
+import { addTorso } from './body/torso.js';
+import { addNeck } from './body/neck.js';
+import { addHead } from './body/head.js';
+import { addUpperArm } from './body/upperArm.js';
+import { addForearm } from './body/forearm.js';
+import { addUpperLeg } from './body/upperLeg.js';
+import { addLowerLeg } from './body/lowerLeg.js';
+import { addSpineJoint } from './joints/spineJoint.js';
+import { addNeckJoint } from './joints/neckJoint.js';
+import { addShoulderJoint } from './joints/shoulderJoint.js';
+import { addClavicleJoint } from './joints/clavicleJoint.js';
+import { addElbowJoint } from './joints/elbowJoint.js';
+import { addWristJoint } from './joints/wristJoint.js';
+import { addHipJoint } from './joints/hipJoint.js';
+import { addPelvisJoint } from './joints/pelvisJoint.js';
+import { addKneeJoint } from './joints/kneeJoint.js';
+import { addAnkleJoint } from './joints/ankleJoint.js';
+import { addSoftTissueJoints } from './joints/softTissueJoint.js';
+import { addTrapeziusJoint } from './joints/trapeziusJoint.js';
 
-function clamp(v, min, max) {
-  return v < min ? min : v > max ? max : v;
-}
-
-function distance(x1, y1, x2, y2) {
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  return Math.hypot(dx, dy);
-}
-
-function segmentDistance(px, py, ax, ay, bx, by) {
-  const abx = bx - ax;
-  const aby = by - ay;
-  const apx = px - ax;
-  const apy = py - ay;
-  const abLenSq = abx * abx + aby * aby;
-  if (abLenSq === 0) {
-    return Math.hypot(apx, apy);
-  }
-  let t = (apx * abx + apy * aby) / abLenSq;
-  t = clamp(t, 0, 1);
-  const cx = ax + abx * t;
-  const cy = ay + aby * t;
-  return Math.hypot(px - cx, py - cy);
-}
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-function easeOutCubic(t) {
-  const inv = 1 - t;
-  return 1 - inv * inv * inv;
-}
+const SIDES = ['L', 'R'];
 
 export class Stickman {
   constructor() {
@@ -136,7 +130,7 @@ export class Stickman {
       return;
     }
 
-    const targetStep = 1 / 90;
+    const targetStep = 1 / 120;
     const steps = Math.max(1, Math.ceil(dt / targetStep));
     const subDt = dt / steps;
 
@@ -144,6 +138,7 @@ export class Stickman {
       this._integrate(subDt);
       this._solveConstraints(room);
       this._applyBounds(room);
+      this._applyFriction(room);
       this._limitVelocity(room);
       this._standAssist(room, subDt);
     }
@@ -198,126 +193,120 @@ export class Stickman {
   _build(room) {
     const cx = room.x + room.w / 2;
     const floor = room.y + room.h - room.stroke - 6;
-    const height = room.h * 0.55;
+    const maxRoomSide = Math.max(room.w, room.h);
+    const maxHeight = maxRoomSide * 0.2;
+    const topLimit = room.y + room.stroke + 6;
+    const availableHeight = floor - topLimit;
+    const height = Math.min(maxHeight, availableHeight * 0.94);
 
-    const headRadius = Math.max(14, Math.round(height * 0.08));
-    const neckLength = headRadius * 0.8;
-    const torsoLength = height * 0.33;
-    const shoulderWidth = headRadius * 2.4;
-    const hipWidth = headRadius * 1.8;
+    const headDiameter = height * 0.18;
+    const headRadius = Math.max(12, headDiameter / 2);
+    const neckLength = Math.max(headRadius * 0.55, height * 0.035);
+    const torsoLength = height * 0.32;
+    const legLength = height - (headDiameter + neckLength + torsoLength);
+    const upperLeg = legLength * 0.48;
+    const lowerLeg = legLength * 0.52;
     const upperArm = torsoLength * 0.55;
-    const forearm = torsoLength * 0.55;
-    const upperLeg = torsoLength * 0.75;
-    const lowerLeg = torsoLength * 0.8;
+    const forearm = torsoLength * 0.62;
+    const shoulderWidth = headRadius * 2.15;
+    const hipWidth = headRadius * 1.45;
 
-    const points = [];
+    const torsoBottomY = floor - lowerLeg - upperLeg;
+    const torsoTopY = torsoBottomY - torsoLength;
+    const shoulderY = torsoTopY + headRadius * 0.1;
+    const hipY = torsoBottomY;
+    const elbowSwingX = headRadius * 0.85;
+    const handSwingX = headRadius * 1.6;
+    const kneeOffsetX = headRadius * 0.28;
+    const footOffsetX = headRadius * 0.45;
 
-    const torsoTopY = floor - (upperLeg + lowerLeg + torsoLength);
-    const torsoBotY = floor - (upperLeg + lowerLeg);
+    const builder = new SkeletonBuilder();
 
-    const addPoint = (x, y, mass = 1) => {
-      points.push({ x, y, px: x, py: y, mass });
-      return points.length - 1;
-    };
+    addTorso(builder, { centerX: cx, topY: torsoTopY, bottomY: torsoBottomY });
+    const neckY = addNeck(builder, { centerX: cx, torsoTopY, length: neckLength });
+    addHead(builder, { centerX: cx, neckY, radius: headRadius });
 
-    const torsoTop = addPoint(cx, torsoTopY, 1.1);
-    const torsoBot = addPoint(cx, torsoBotY, 1.2);
+    const leftBound = room.x + room.stroke + headRadius * 0.8;
+    const rightBound = room.x + room.w - room.stroke - headRadius * 0.8;
+    const handMinY = topLimit + headRadius * 0.6;
 
-    const neck = addPoint(cx, torsoTopY - neckLength, 0.6);
-    const neckPoint = points[neck];
-    const head = addPoint(cx, neckPoint.y - headRadius * 1.5, 0.8);
+    SIDES.forEach((side) => {
+      const sign = side === 'L' ? -1 : 1;
+      const shoulderX = cx + sign * (shoulderWidth / 2);
+      const reach = Math.max((upperArm + forearm) * 0.85, headRadius * 1.9);
+      const targetHandY = Math.min(shoulderY - reach, neckY - headRadius * 0.2);
+      const handY = Math.max(targetHandY, handMinY);
+      const elbowSpan = Math.max(headRadius * 0.7, (shoulderY - handY) * 0.55);
+      const elbowY = Math.min(handY + elbowSpan, shoulderY - headRadius * 0.2);
+      const elbowX = clamp(shoulderX + sign * elbowSwingX, leftBound, rightBound);
+      const handX = clamp(shoulderX + sign * handSwingX, leftBound, rightBound);
 
-    const shoulderY = torsoTopY + headRadius * 0.25;
-    const hipY = torsoBotY;
+      addUpperArm(builder, side, {
+        shoulderX,
+        shoulderY,
+        elbowX,
+        elbowY,
+      });
+      addForearm(builder, side, {
+        handX,
+        handY,
+      });
+    });
 
-    const shoulderL = addPoint(cx - shoulderWidth / 2, shoulderY, 0.9);
-    const shoulderR = addPoint(cx + shoulderWidth / 2, shoulderY, 0.9);
+    SIDES.forEach((side) => {
+      const sign = side === 'L' ? -1 : 1;
+      const hipX = cx + sign * (hipWidth / 2);
+      const kneeX = clamp(hipX + sign * kneeOffsetX, leftBound, rightBound);
+      const footX = clamp(hipX + sign * footOffsetX, leftBound, rightBound);
+      const kneeY = hipY + upperLeg;
+      const footY = floor;
 
-    const shoulderLPoint = points[shoulderL];
-    const shoulderRPoint = points[shoulderR];
-    const elbowL = addPoint(shoulderLPoint.x - headRadius * 0.2, shoulderY + upperArm, 0.7);
-    const elbowR = addPoint(shoulderRPoint.x + headRadius * 0.2, shoulderY + upperArm, 0.7);
+      addUpperLeg(builder, side, {
+        hipX,
+        hipY,
+        kneeX,
+        kneeY,
+      });
+      addLowerLeg(builder, side, {
+        footX,
+        footY,
+      });
+    });
 
-    const elbowLPoint = points[elbowL];
-    const elbowRPoint = points[elbowR];
-    const handL = addPoint(elbowLPoint.x - headRadius * 0.2, elbowLPoint.y + forearm, 0.7);
-    const handR = addPoint(elbowRPoint.x + headRadius * 0.2, elbowRPoint.y + forearm, 0.7);
+    addSpineJoint(builder);
+    addNeckJoint(builder);
+    addClavicleJoint(builder);
+    addTrapeziusJoint(builder);
+    addPelvisJoint(builder);
+    addSoftTissueJoints(builder);
 
-    const hipL = addPoint(cx - hipWidth / 2, hipY, 1.0);
-    const hipR = addPoint(cx + hipWidth / 2, hipY, 1.0);
+    SIDES.forEach((side) => {
+      addShoulderJoint(builder, side);
+      addElbowJoint(builder, side);
+      addWristJoint(builder, side);
+      addHipJoint(builder, side);
+      addKneeJoint(builder, side);
+      addAnkleJoint(builder, side);
+    });
 
-    const hipLPoint = points[hipL];
-    const hipRPoint = points[hipR];
-    const kneeL = addPoint(hipLPoint.x - headRadius * 0.1, hipY + upperLeg, 0.9);
-    const kneeR = addPoint(hipRPoint.x + headRadius * 0.1, hipY + upperLeg, 0.9);
-
-    const kneeLPoint = points[kneeL];
-    const kneeRPoint = points[kneeR];
-    const footL = addPoint(kneeLPoint.x - headRadius * 0.1, floor, 1.1);
-    const footR = addPoint(kneeRPoint.x + headRadius * 0.1, floor, 1.1);
+    const { points, constraints, lines, names } = builder.build();
 
     this.points = points;
-    this.constraints = [];
-    this.lines = [];
-
-    const addConstraint = (i, j, stiffness = 1) => {
-      const a = this.points[i];
-      const b = this.points[j];
-      const length = distance(a.x, a.y, b.x, b.y);
-      this.constraints.push({ i, j, length, stiffness });
-      this.lines.push([i, j]);
-    };
-
-    const addRigid = (i, j) => addConstraint(i, j, 0.95);
-
-    addRigid(torsoTop, torsoBot);
-    addRigid(torsoTop, neck);
-    addRigid(neck, head);
-
-    addRigid(torsoTop, shoulderL);
-    addRigid(torsoTop, shoulderR);
-    addRigid(shoulderL, shoulderR);
-
-    addRigid(shoulderL, elbowL);
-    addRigid(elbowL, handL);
-    addRigid(shoulderR, elbowR);
-    addRigid(elbowR, handR);
-
-    addRigid(torsoBot, hipL);
-    addRigid(torsoBot, hipR);
-    addRigid(hipL, hipR);
-
-    addRigid(hipL, kneeL);
-    addRigid(kneeL, footL);
-    addRigid(hipR, kneeR);
-    addRigid(kneeR, footR);
-
-    const addSoft = (i, j) => {
-      const a = this.points[i];
-      const b = this.points[j];
-      const length = distance(a.x, a.y, b.x, b.y);
-      this.constraints.push({ i, j, length, stiffness: 0.4 });
-    };
-
-    addSoft(torsoTop, hipL);
-    addSoft(torsoTop, hipR);
-    addSoft(shoulderL, torsoBot);
-    addSoft(shoulderR, torsoBot);
-    addSoft(shoulderL, hipR);
-    addSoft(shoulderR, hipL);
+    this.constraints = constraints;
+    this.lines = lines;
 
     this.render = {
-      headIndex: head,
+      headIndex: names.get('head') ?? -1,
       headRadius,
-      lineWidth: Math.max(2, Math.round(room.h * 0.006)),
-      torsoTop,
-      torsoBot,
-      hipL,
-      hipR,
-      kneeL,
-      kneeR,
-      footL,
-      footR,
+      lineWidth: Math.max(2, Math.round(Math.max(room.w, room.h) * 0.0045)),
+      torsoTop: names.get('torsoTop'),
+      torsoBottom: names.get('torsoBottom'),
+      hipL: names.get('hipL'),
+      hipR: names.get('hipR'),
+      kneeL: names.get('kneeL'),
+      kneeR: names.get('kneeR'),
+      footL: names.get('footL'),
+      footR: names.get('footR'),
       face: {
         eyeOffsetX: headRadius * 0.4,
         eyeOffsetY: headRadius * 0.25,
@@ -332,12 +321,13 @@ export class Stickman {
     };
 
     this.bindPose = this.points.map((p) => ({ x: p.x, y: p.y }));
+    this.gravity = Math.max(1100, height * 55);
     this._cancelStand();
   }
 
   _integrate(dt) {
     const dragIndex = this.drag.index;
-    const damping = 0.995;
+    const damping = 0.993;
     const accelY = this.gravity;
     const dtSq = dt * dt;
 
@@ -357,8 +347,8 @@ export class Stickman {
     }
   }
 
-  _solveConstraints(room) {
-    const iterations = 8;
+  _solveConstraints() {
+    const iterations = 9;
     for (let iter = 0; iter < iterations; iter++) {
       for (const constraint of this.constraints) {
         const a = this.points[constraint.i];
@@ -392,7 +382,7 @@ export class Stickman {
 
   _applyBounds(room) {
     const bounds = this._dragBounds(room);
-    const restitution = 0.3;
+    const restitution = 0.26;
 
     for (let i = 0; i < this.points.length; i++) {
       if (i === this.drag.index) {
@@ -424,8 +414,23 @@ export class Stickman {
     }
   }
 
+  _applyFriction(room) {
+    const floor = room.y + room.h - room.stroke - 6;
+    const friction = 0.78;
+    for (let i = 0; i < this.points.length; i++) {
+      if (i === this.drag.index) {
+        continue;
+      }
+      const p = this.points[i];
+      if (Math.abs(p.y - floor) <= this.render.headRadius * 0.4) {
+        const vx = p.x - p.px;
+        p.px = p.x - vx * friction;
+      }
+    }
+  }
+
   _limitVelocity(room) {
-    const maxSpeed = room.h * 0.035;
+    const maxSpeed = Math.max(room.w, room.h) * 0.03;
     for (const p of this.points) {
       const vx = p.x - p.px;
       const vy = p.y - p.py;
