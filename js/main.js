@@ -4,7 +4,8 @@ const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d', { alpha: false });
 let DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
 
-const HOLD_MS = 140;
+const HOLD_TO_DRAG_MS = 140;
+const DRAG_THRESHOLD_PX = 6;
 const ROOM_MARGIN = 0.06;
 
 const DEFAULT_PHRASES = [
@@ -27,13 +28,16 @@ const state = {
   phrases: [...DEFAULT_PHRASES],
   input: {
     pointerId: null,
-    holdTimer: null,
+    pendingIndex: null,
     dragging: false,
     lastPX: 0,
     lastPY: 0,
     lastPT: 0,
     vX: 0,
     vY: 0,
+    downPX: 0,
+    downPY: 0,
+    downPT: 0,
   },
 };
 
@@ -132,6 +136,9 @@ async function loadPhrases() {
 }
 
 function onPointerDown(e) {
+  if (state.input.pointerId !== null) {
+    return;
+  }
   const p = canvasPoint(e);
   const idx = stickman.nearestGrab(p.x, p.y);
   if (idx === -1) {
@@ -139,24 +146,24 @@ function onPointerDown(e) {
   }
   stickman.notifyUserAction();
   state.input.pointerId = e.pointerId;
+  state.input.pendingIndex = idx;
   state.input.lastPX = p.x;
   state.input.lastPY = p.y;
   state.input.lastPT = p.t;
+  state.input.downPX = p.x;
+  state.input.downPY = p.y;
+  state.input.downPT = p.t;
   state.input.vX = 0;
   state.input.vY = 0;
-  state.input.holdTimer = window.setTimeout(() => {
-    state.input.dragging = true;
-    stickman.startGrab(idx);
-    stickman.dragTo(p.x, p.y, state.room);
-    try {
-      canvas.setPointerCapture(e.pointerId);
-    } catch (err) {
-      console.debug('Pointer capture non disponibile', err);
-    }
-    if (navigator.vibrate) {
-      navigator.vibrate(8);
-    }
-  }, HOLD_MS);
+  state.input.dragging = false;
+  try {
+    canvas.setPointerCapture(e.pointerId);
+  } catch (err) {
+    console.debug('Pointer capture non disponibile', err);
+  }
+  if (navigator.vibrate) {
+    navigator.vibrate(4);
+  }
 }
 
 function onPointerMove(e) {
@@ -167,6 +174,18 @@ function onPointerMove(e) {
   const dt = Math.max(0.001, (p.t - state.input.lastPT) / 1000);
   state.input.vX = (p.x - state.input.lastPX) / dt;
   state.input.vY = (p.y - state.input.lastPY) / dt;
+  if (!state.input.dragging && state.input.pendingIndex !== null) {
+    const dist = Math.hypot(p.x - state.input.downPX, p.y - state.input.downPY);
+    const held = p.t - state.input.downPT;
+    if (dist >= DRAG_THRESHOLD_PX || held >= HOLD_TO_DRAG_MS) {
+      state.input.dragging = true;
+      stickman.startGrab(state.input.pendingIndex);
+      stickman.dragTo(p.x, p.y, state.room);
+      if (navigator.vibrate) {
+        navigator.vibrate(8);
+      }
+    }
+  }
   if (state.input.dragging) {
     stickman.dragTo(p.x, p.y, state.room);
   }
@@ -179,15 +198,23 @@ function onPointerUp(e) {
   if (state.input.pointerId !== e.pointerId) {
     return;
   }
-  window.clearTimeout(state.input.holdTimer);
   const wasDragging = state.input.dragging;
+  const pendingIndex = state.input.pendingIndex;
   state.input.pointerId = null;
   state.input.dragging = false;
+  state.input.pendingIndex = null;
+  try {
+    canvas.releasePointerCapture(e.pointerId);
+  } catch (err) {
+    console.debug('Impossibile rilasciare il pointer capture', err);
+  }
   if (wasDragging) {
     stickman.release(state.input.vX, state.input.vY);
     return;
   }
-  speakAt(state.input.lastPX, state.input.lastPY);
+  if (pendingIndex !== null) {
+    speakAt(state.input.lastPX, state.input.lastPY);
+  }
 }
 
 canvas.addEventListener('pointerdown', onPointerDown, { passive: true });
