@@ -1,1 +1,0 @@
-export function jointHips(sticks, torso, legL, legR, hipW){sticks.push({i:torso.torsoBot,j:legL.hip,len:hipW*0.55});sticks.push({i:torso.torsoBot,j:legR.hip,len:hipW*0.55});sticks.push({i:legL.hip,j:legR.hip,len:hipW});}
