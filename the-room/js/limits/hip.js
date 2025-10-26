@@ -1,0 +1,1 @@
+import { limitAngle } from '../core/angles.js';export function enforceHipLimits(points, torso, legL, legR){limitAngle(points, torso.torsoBot, legL.hip, legL.knee, 20, 160, 0.22, 1.0);limitAngle(points, torso.torsoBot, legR.hip, legR.knee, 20, 160, 0.22, 1.0);}
