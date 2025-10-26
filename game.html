@@ -1,18 +1,50 @@
 <!doctype html>
 <html lang="it">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>The Room — Gioco</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <link rel="stylesheet" href="styles.css" />
-  <style>
-    html, body { height: 100%; background: #000; }
-    body.game { margin: 0; overflow: hidden; touch-action: none; user-select: none; }
-    #stage { display: block; width: 100vw; height: 100vh; }
-  </style>
+  <link rel="preload" href="styles.css" as="style">
+  <link rel="stylesheet" href="styles.css">
+  <meta name="color-scheme" content="dark">
 </head>
 <body class="game">
-  <canvas id="stage" aria-label="The Room"></canvas>
-  <script type="module" src="js/main.js"></script>
+  <main class="wrap">
+    <section class="hero">
+      <h1>Gioco</h1>
+      <p class="subtitle">Dummy fisico in una stanza</p>
+    </section>
+
+    <section class="stage">
+      <canvas id="gameCanvas" aria-label="Canvas di gioco"></canvas>
+
+      <!-- Overlay KPI -->
+      <div class="hud">
+        <div class="row">
+          <span>KE</span><strong id="ke">0</strong>
+        </div>
+        <div class="row">
+          <span>PE</span><strong id="pe">0</strong>
+        </div>
+        <div class="row">
+          <span>TOT</span><strong id="etot">0</strong>
+        </div>
+        <div class="row small">
+          <span>v<sub>lancio</sub></span><strong id="vlaunch">0</strong>
+        </div>
+      </div>
+
+      <!-- Help minimale -->
+      <div class="help">
+        <p>Trascina il dummy e rilascia per lanciarlo. Attrito aria e pareti attivi</p>
+      </div>
+    </section>
+
+    <nav class="actions">
+      <a class="btn btn-ghost" href="index.html">Indietro</a>
+    </nav>
+  </main>
+
+  <script src="js/game.js" defer></script>
 </body>
 </html>

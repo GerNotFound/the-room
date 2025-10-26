@@ -1,22 +1,27 @@
 <!doctype html>
 <html lang="it">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>The Room — Home</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="preload" href="styles.css" as="style">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body class="home">
   <main class="wrap">
-    <header class="hero">
+    <section class="hero">
       <h1>The Room</h1>
-    </header>
-    <div class="actions">
+      <p class="subtitle">Prototype web in bianco e nero</p>
+    </section>
+
+    <nav class="actions">
       <a class="btn btn-primary" href="game.html">Gioca</a>
-    </div>
-    <footer class="meta">
       <a class="btn btn-ghost" href="settings.html">Impostazioni</a>
-    </footer>
+    </nav>
+
+    <div class="meta">
+      <a class="btn btn-ghost" href="https://github.com/GerNotFound/the-room">Repo</a>
+    </div>
   </main>
 </body>
 </html>
