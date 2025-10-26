@@ -30,6 +30,7 @@ const state = {
     pointerId: null,
     pendingIndex: null,
     dragging: false,
+    tappedHead: false,
     lastPX: 0,
     lastPY: 0,
     lastPT: 0,
@@ -147,6 +148,7 @@ function onPointerDown(e) {
   stickman.notifyUserAction();
   state.input.pointerId = e.pointerId;
   state.input.pendingIndex = idx;
+  state.input.tappedHead = idx === stickman.render.headIndex;
   state.input.lastPX = p.x;
   state.input.lastPY = p.y;
   state.input.lastPT = p.t;
@@ -200,9 +202,11 @@ function onPointerUp(e) {
   }
   const wasDragging = state.input.dragging;
   const pendingIndex = state.input.pendingIndex;
+  const tappedHead = state.input.tappedHead;
   state.input.pointerId = null;
   state.input.dragging = false;
   state.input.pendingIndex = null;
+  state.input.tappedHead = false;
   try {
     canvas.releasePointerCapture(e.pointerId);
   } catch (err) {
@@ -212,7 +216,7 @@ function onPointerUp(e) {
     stickman.release(state.input.vX, state.input.vY);
     return;
   }
-  if (pendingIndex !== null) {
+  if (pendingIndex !== null && tappedHead) {
     speakAt(state.input.lastPX, state.input.lastPY);
   }
 }
