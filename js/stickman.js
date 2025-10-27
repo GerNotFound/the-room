@@ -62,9 +62,13 @@ export class Stickman {
       stiffness: 0.62,
       damping: 0.55,
       sampleDt: 1 / 60,
+      history: [],
     };
+    this.baseSubstep = 1 / 120;
     this.gravity = 9.81;
-    this.airDrag = 0.992;
+    this.linearDampingBase = 0.999;
+    this.airDragBase = 0.995;
+    this.floorFrictionBase = 0.86;
     this.scale = 1;
     this.totalMass = 0;
     this.lastAction = performance.now();
@@ -103,6 +107,7 @@ export class Stickman {
     this.drag.lastY = p.y;
     this.drag.lastT = performance.now();
     this.drag.sampleDt = 1 / 60;
+    this.drag.history.length = 0;
     this.notifyUserAction();
   }
 
@@ -115,8 +120,11 @@ export class Stickman {
     const cy = clamp(y, bounds.t, bounds.b);
     const now = performance.now();
     const dt = Math.max(1e-3, (now - this.drag.lastT) / 1000);
-    this.drag.pointerVX = (cx - this.drag.lastX) / dt;
-    this.drag.pointerVY = (cy - this.drag.lastY) / dt;
+    const vx = (cx - this.drag.lastX) / dt;
+    const vy = (cy - this.drag.lastY) / dt;
+    this.drag.pointerVX = vx;
+    this.drag.pointerVY = vy;
+    this._pushPointerSample(vx, vy, dt);
     this.drag.sampleDt = dt;
     this.drag.targetX = cx;
     this.drag.targetY = cy;
@@ -130,9 +138,8 @@ export class Stickman {
       return;
     }
 
-    const releaseDt = 1 / 120;
-    const pointerVX = Number.isFinite(vx) ? vx : this.drag.pointerVX;
-    const pointerVY = Number.isFinite(vy) ? vy : this.drag.pointerVY;
+    const releaseDt = this.baseSubstep;
+    const { vx: pointerVX, vy: pointerVY } = this._pointerReleaseVelocity(vx, vy);
     const desiredStepX = pointerVX * releaseDt;
     const desiredStepY = pointerVY * releaseDt;
     const maxLinearStep = this.render.headRadius * 12;
@@ -214,7 +221,49 @@ export class Stickman {
     this.drag.pointerVX = 0;
     this.drag.pointerVY = 0;
     this.drag.sampleDt = 1 / 60;
+    this.drag.history.length = 0;
     this.notifyUserAction();
+  }
+
+  _pushPointerSample(vx, vy, dt) {
+    if (!Number.isFinite(vx) || !Number.isFinite(vy) || !Number.isFinite(dt)) {
+      return;
+    }
+    const cappedDt = clamp(dt, 1e-3, 0.12);
+    const maxSpeed = this.render.headRadius * 42;
+    const scale = Math.min(1, maxSpeed / (Math.hypot(vx, vy) + 1e-6));
+    const entry = { vx: vx * scale, vy: vy * scale, dt: cappedDt };
+    this.drag.history.push(entry);
+    const maxSamples = 10;
+    if (this.drag.history.length > maxSamples) {
+      this.drag.history.splice(0, this.drag.history.length - maxSamples);
+    }
+  }
+
+  _pointerReleaseVelocity(vx, vy) {
+    if (Number.isFinite(vx) && Number.isFinite(vy)) {
+      return { vx, vy };
+    }
+    const history = this.drag.history;
+    if (!history.length) {
+      return { vx: this.drag.pointerVX, vy: this.drag.pointerVY };
+    }
+    let weight = 0;
+    let sumVX = 0;
+    let sumVY = 0;
+    let decay = 1;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const sample = history[i];
+      const w = sample.dt * decay;
+      sumVX += sample.vx * w;
+      sumVY += sample.vy * w;
+      weight += w;
+      decay *= 0.65;
+    }
+    if (weight <= 1e-6) {
+      return { vx: this.drag.pointerVX, vy: this.drag.pointerVY };
+    }
+    return { vx: sumVX / weight, vy: sumVY / weight };
   }
 
   nearestGrab(x, y) {
@@ -250,19 +299,22 @@ export class Stickman {
       return;
     }
 
-    const targetStep = 1 / 120;
+    const targetStep = this.baseSubstep;
     const steps = Math.max(1, Math.ceil(dt / targetStep));
     const subDt = dt / steps;
-    const accelTerm = this.gravity * dt * dt / steps;
+    const accelTerm = this.gravity * subDt * subDt;
+    const damping = Math.pow(this.linearDampingBase, Math.max(0, subDt / targetStep));
+    const airDrag = Math.pow(this.airDragBase, Math.max(0, subDt / targetStep));
+    const friction = Math.pow(this.floorFrictionBase, Math.max(0, subDt / targetStep));
 
     for (let s = 0; s < steps; s++) {
-      this._integrate(subDt, accelTerm);
+      this._integrate(subDt, accelTerm, damping);
       this._applyDrag(subDt);
       this._solveConstraints();
       this._applyBounds(room);
-      this._applyFriction(room);
-      this._applyAirDrag();
-      this._limitVelocity(room);
+      this._applyFriction(room, friction);
+      this._applyAirDrag(airDrag);
+      this._limitVelocity(room, subDt);
       this._stabilizeVelocities(room);
       this._standAssist(room, subDt);
     }
@@ -415,9 +467,11 @@ export class Stickman {
     const pixelsPerMeter = totalHeight / 1.8;
     this.scale = pixelsPerMeter;
     this.gravity = 9.81 * pixelsPerMeter;
-    this.airDrag = 0.992;
-    this.drag.stiffness = 0.62;
-    this.drag.damping = 0.55;
+    this.linearDampingBase = 0.9992;
+    this.airDragBase = 0.9965;
+    this.floorFrictionBase = 0.88;
+    this.drag.stiffness = 0.7;
+    this.drag.damping = 0.62;
     this.drag.index = -1;
     this.drag.targetX = cx;
     this.drag.targetY = torsoBottomY;
@@ -430,9 +484,8 @@ export class Stickman {
     this._cancelStand();
   }
 
-  _integrate(dt, accelTerm) {
+  _integrate(dt, accelTerm, damping) {
     const dragIndex = this.drag.index;
-    const damping = 0.998;
 
     for (let i = 0; i < this.points.length; i++) {
       if (i === dragIndex) {
@@ -602,9 +655,8 @@ export class Stickman {
     }
   }
 
-  _applyFriction(room) {
+  _applyFriction(room, friction) {
     const floor = room.y + room.h - room.stroke - 6;
-    const friction = 0.78;
     for (let i = 0; i < this.points.length; i++) {
       if (i === this.drag.index) {
         continue;
@@ -617,8 +669,7 @@ export class Stickman {
     }
   }
 
-  _applyAirDrag() {
-    const drag = this.airDrag;
+  _applyAirDrag(drag) {
     for (let i = 0; i < this.points.length; i++) {
       if (i === this.drag.index) {
         continue;
@@ -631,12 +682,14 @@ export class Stickman {
     }
   }
 
-  _limitVelocity(room) {
-    const maxSpeed = Math.max(room.w, room.h) * 0.06;
+  _limitVelocity(room, stepDt) {
+    const maxStep = Math.max(room.w, room.h) * 0.12;
+    const dtScale = stepDt > 0 ? stepDt / this.baseSubstep : 1;
     for (const p of this.points) {
       const vx = p.x - p.px;
       const vy = p.y - p.py;
       const speed = Math.hypot(vx, vy);
+      const maxSpeed = maxStep * dtScale;
       if (speed > maxSpeed) {
         const scale = maxSpeed / (speed + 1e-6);
         p.px = p.x - vx * scale;
@@ -646,7 +699,7 @@ export class Stickman {
   }
 
   _stabilizeVelocities(room) {
-    const tolerance = Math.max(0.08, Math.max(room.w, room.h) * 0.00045);
+    const tolerance = Math.max(0.05, Math.max(room.w, room.h) * 0.00028);
     const toleranceSq = tolerance * tolerance;
     for (let i = 0; i < this.points.length; i++) {
       if (i === this.drag.index) {
