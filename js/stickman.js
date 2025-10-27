@@ -129,25 +129,83 @@ export class Stickman {
     if (this.drag.index === -1) {
       return;
     }
-    const dt = clamp(this.drag.sampleDt || 1 / 120, 1 / 240, 1 / 15);
-    const safeVX = Number.isFinite(vx) ? vx : 0;
-    const safeVY = Number.isFinite(vy) ? vy : 0;
-    let stepX = safeVX * dt;
-    let stepY = safeVY * dt;
-    const maxStep = this.render.headRadius * 10;
-    const magnitude = Math.hypot(stepX, stepY);
-    if (magnitude > maxStep) {
-      const scale = maxStep / (magnitude + 1e-6);
-      stepX *= scale;
-      stepY *= scale;
+
+    const releaseDt = 1 / 120;
+    const pointerVX = Number.isFinite(vx) ? vx : this.drag.pointerVX;
+    const pointerVY = Number.isFinite(vy) ? vy : this.drag.pointerVY;
+    const desiredStepX = pointerVX * releaseDt;
+    const desiredStepY = pointerVY * releaseDt;
+    const maxLinearStep = this.render.headRadius * 12;
+
+    let totalMass = 0;
+    let comX = 0;
+    let comY = 0;
+    let comVX = 0;
+    let comVY = 0;
+
+    for (const point of this.points) {
+      const mass = point.mass || 1;
+      const vxPrev = point.x - point.px;
+      const vyPrev = point.y - point.py;
+      totalMass += mass;
+      comX += point.x * mass;
+      comY += point.y * mass;
+      comVX += vxPrev * mass;
+      comVY += vyPrev * mass;
     }
 
-    for (let i = 0; i < this.points.length; i++) {
-      const point = this.points[i];
+    if (totalMass === 0) {
+      totalMass = this.points.length || 1;
+    }
+
+    comX /= totalMass;
+    comY /= totalMass;
+    comVX /= totalMass;
+    comVY /= totalMass;
+
+    let deltaLinearX = desiredStepX - comVX;
+    let deltaLinearY = desiredStepY - comVY;
+    const linearMag = Math.hypot(deltaLinearX, deltaLinearY);
+    if (linearMag > maxLinearStep) {
+      const scale = maxLinearStep / (linearMag + 1e-6);
+      deltaLinearX *= scale;
+      deltaLinearY *= scale;
+    }
+
+    const grabbed = this.points[this.drag.index];
+    const grabbedVX = grabbed.x - grabbed.px;
+    const grabbedVY = grabbed.y - grabbed.py;
+    const afterLinearVX = grabbedVX + deltaLinearX;
+    const afterLinearVY = grabbedVY + deltaLinearY;
+    const remainingVX = desiredStepX - afterLinearVX;
+    const remainingVY = desiredStepY - afterLinearVY;
+
+    const relGX = grabbed.x - comX;
+    const relGY = grabbed.y - comY;
+    const inertia = relGX * relGX + relGY * relGY;
+    let omega = 0;
+    if (inertia > 1e-6) {
+      omega = (relGX * remainingVY - relGY * remainingVX) / inertia;
+    }
+    const maxOmega = (Math.PI * 4) / Math.max(this.render.headRadius, 1);
+    omega = clamp(omega, -maxOmega, maxOmega);
+
+    const maxSpeed = this.render.headRadius * 14;
+    for (const point of this.points) {
       const prevVX = point.x - point.px;
       const prevVY = point.y - point.py;
-      const newVX = prevVX + stepX;
-      const newVY = prevVY + stepY;
+      const relX = point.x - comX;
+      const relY = point.y - comY;
+      const rotVX = -omega * relY;
+      const rotVY = omega * relX;
+      let newVX = prevVX + deltaLinearX + rotVX;
+      let newVY = prevVY + deltaLinearY + rotVY;
+      const speed = Math.hypot(newVX, newVY);
+      if (speed > maxSpeed) {
+        const scale = maxSpeed / (speed + 1e-6);
+        newVX *= scale;
+        newVY *= scale;
+      }
       point.px = point.x - newVX;
       point.py = point.y - newVY;
     }
@@ -256,7 +314,7 @@ export class Stickman {
     const kneeOffsetX = hipWidth * 0.28;
     const footOffsetX = hipWidth * 0.32;
 
-    const footY = Math.min(floor, topLimit + totalHeight);
+    const footY = floor;
     const kneeY = footY - lowerLeg;
     const hipY = kneeY - upperLeg;
     const torsoBottomY = hipY;
