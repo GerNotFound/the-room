@@ -6,6 +6,7 @@ import {
   segmentDistance,
   lerp,
   easeOutCubic,
+  normalizeAngle,
 } from './utils/math.js';
 import { addTorso } from './body/torso.js';
 import { addNeck } from './body/neck.js';
@@ -33,18 +34,38 @@ export class Stickman {
   constructor() {
     this.points = [];
     this.constraints = [];
+    this.hinges = [];
     this.lines = [];
     this.render = {
       headIndex: -1,
       headRadius: 18,
-      face: null,
+      lineWidth: 2,
+      torsoTop: -1,
+      torsoBottom: -1,
+      hipL: -1,
+      hipR: -1,
+      kneeL: -1,
+      kneeR: -1,
+      footL: -1,
+      footR: -1,
     };
     this.bindPose = [];
     this.drag = {
       index: -1,
+      targetX: 0,
+      targetY: 0,
+      pointerVX: 0,
+      pointerVY: 0,
+      lastX: 0,
+      lastY: 0,
+      lastT: 0,
+      stiffness: 0.62,
+      damping: 0.55,
     };
-    this.gravity = 6600;
-    this.airDrag = 0.985;
+    this.gravity = 9.81;
+    this.airDrag = 0.992;
+    this.scale = 1;
+    this.totalMass = 0;
     this.lastAction = performance.now();
     this.stand = {
       active: false,
@@ -68,7 +89,18 @@ export class Stickman {
   }
 
   startGrab(index) {
+    if (index < 0 || index >= this.points.length) {
+      return;
+    }
+    const p = this.points[index];
     this.drag.index = index;
+    this.drag.targetX = p.x;
+    this.drag.targetY = p.y;
+    this.drag.pointerVX = 0;
+    this.drag.pointerVY = 0;
+    this.drag.lastX = p.x;
+    this.drag.lastY = p.y;
+    this.drag.lastT = performance.now();
     this.notifyUserAction();
   }
 
@@ -76,14 +108,18 @@ export class Stickman {
     if (this.drag.index === -1) {
       return;
     }
-    const p = this.points[this.drag.index];
     const bounds = this._dragBounds(room);
     const cx = clamp(x, bounds.l, bounds.r);
     const cy = clamp(y, bounds.t, bounds.b);
-    p.x = cx;
-    p.y = cy;
-    p.px = cx;
-    p.py = cy;
+    const now = performance.now();
+    const dt = Math.max(1e-3, (now - this.drag.lastT) / 1000);
+    this.drag.pointerVX = (cx - this.drag.lastX) / dt;
+    this.drag.pointerVY = (cy - this.drag.lastY) / dt;
+    this.drag.targetX = cx;
+    this.drag.targetY = cy;
+    this.drag.lastX = cx;
+    this.drag.lastY = cy;
+    this.drag.lastT = now;
   }
 
   release(vx, vy) {
@@ -95,13 +131,15 @@ export class Stickman {
     const p = this.points[index];
     const impulseX = vx * dt;
     const impulseY = vy * dt;
-    const share = 0.55;
-    const selfImpulseX = impulseX * (1 - share);
-    const selfImpulseY = impulseY * (1 - share);
+    const massShare = clamp(1 - (p.mass || 1) / (this.totalMass || 1), 0.35, 0.85);
+    const selfImpulseX = impulseX * (1 - massShare);
+    const selfImpulseY = impulseY * (1 - massShare);
     p.px = p.x - selfImpulseX;
     p.py = p.y - selfImpulseY;
     this.drag.index = -1;
-    this._distributeMomentum(index, impulseX * share, impulseY * share);
+    this.drag.pointerVX = 0;
+    this.drag.pointerVY = 0;
+    this._distributeMomentum(index, impulseX * massShare, impulseY * massShare);
     this.notifyUserAction();
   }
 
@@ -192,7 +230,8 @@ export class Stickman {
 
     for (let s = 0; s < steps; s++) {
       this._integrate(subDt);
-      this._solveConstraints(room);
+      this._applyDrag(subDt);
+      this._solveConstraints();
       this._applyBounds(room);
       this._applyFriction(room);
       this._applyAirDrag();
@@ -224,59 +263,35 @@ export class Stickman {
       ctx.lineWidth = this.render.lineWidth;
       ctx.arc(head.x, head.y, this.render.headRadius, 0, TAU);
       ctx.stroke();
-
-      const face = this.render.face;
-      if (face) {
-        const eyeY = head.y - face.eyeOffsetY;
-        ctx.beginPath();
-        ctx.fillStyle = '#fff';
-        ctx.arc(head.x - face.eyeOffsetX, eyeY, face.eyeRadius, 0, TAU);
-        ctx.arc(head.x + face.eyeOffsetX, eyeY, face.eyeRadius, 0, TAU);
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.lineWidth = face.noseThickness;
-        ctx.moveTo(head.x - face.noseLength * 0.5, head.y);
-        ctx.lineTo(head.x + face.noseLength * 0.5, head.y);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.lineWidth = face.mouthThickness;
-        ctx.arc(head.x + face.mouthOffsetX, head.y + face.mouthOffsetY, face.mouthRadius, -0.6 * Math.PI, 0.6 * Math.PI);
-        ctx.stroke();
-      }
     }
   }
 
   _build(room) {
     const cx = room.x + room.w / 2;
     const floor = room.y + room.h - room.stroke - 6;
-    const maxRoomSide = Math.max(room.w, room.h);
-    const maxHeight = maxRoomSide * 0.2;
     const topLimit = room.y + room.stroke + 6;
-    const availableHeight = floor - topLimit;
-    const height = Math.min(maxHeight, availableHeight * 0.94);
+    const totalHeight = room.h / 6;
 
-    const headDiameter = height * 0.18;
-    const headRadius = Math.max(12, headDiameter / 2);
-    const neckLength = Math.max(headRadius * 0.55, height * 0.035);
-    const torsoLength = height * 0.32;
-    const legLength = height - (headDiameter + neckLength + torsoLength);
-    const upperLeg = legLength * 0.48;
-    const lowerLeg = legLength * 0.52;
-    const upperArm = torsoLength * 0.55;
-    const forearm = torsoLength * 0.62;
-    const shoulderWidth = headRadius * 2.15;
-    const hipWidth = headRadius * 1.45;
+    const headRadius = Math.max(10, totalHeight * 0.11);
+    const neckLength = totalHeight * 0.05;
+    const torsoLength = totalHeight * 0.32;
+    const legLength = Math.max(totalHeight - (torsoLength + neckLength + headRadius * 2), totalHeight * 0.2);
+    const upperLeg = legLength * 0.52;
+    const lowerLeg = legLength - upperLeg;
+    const upperArm = totalHeight * 0.18;
+    const forearm = totalHeight * 0.17;
+    const shoulderWidth = totalHeight * 0.22;
+    const hipWidth = totalHeight * 0.16;
+    const elbowSwingX = shoulderWidth * 0.4;
+    const handSwingX = shoulderWidth * 0.85;
+    const kneeOffsetX = hipWidth * 0.28;
+    const footOffsetX = hipWidth * 0.32;
 
-    const torsoBottomY = floor - lowerLeg - upperLeg;
+    const footY = Math.min(floor, topLimit + totalHeight);
+    const kneeY = footY - lowerLeg;
+    const hipY = kneeY - upperLeg;
+    const torsoBottomY = hipY;
     const torsoTopY = torsoBottomY - torsoLength;
-    const shoulderY = torsoTopY + headRadius * 0.1;
-    const hipY = torsoBottomY;
-    const elbowSwingX = headRadius * 0.85;
-    const handSwingX = headRadius * 1.6;
-    const kneeOffsetX = headRadius * 0.28;
-    const footOffsetX = headRadius * 0.45;
 
     const builder = new SkeletonBuilder();
 
@@ -287,15 +302,16 @@ export class Stickman {
     const leftBound = room.x + room.stroke + headRadius * 0.8;
     const rightBound = room.x + room.w - room.stroke - headRadius * 0.8;
     const handMinY = topLimit + headRadius * 0.6;
+    const shoulderY = torsoTopY + neckLength * 0.25;
 
     SIDES.forEach((side) => {
       const sign = side === 'L' ? -1 : 1;
       const shoulderX = cx + sign * (shoulderWidth / 2);
-      const reach = Math.max((upperArm + forearm) * 0.85, headRadius * 1.9);
-      const targetHandY = Math.min(shoulderY - reach, neckY - headRadius * 0.2);
+      const reach = Math.max((upperArm + forearm) * 0.92, headRadius * 2);
+      const targetHandY = Math.min(shoulderY - reach, neckY - headRadius * 0.25);
       const handY = Math.max(targetHandY, handMinY);
-      const elbowSpan = Math.max(headRadius * 0.7, (shoulderY - handY) * 0.55);
-      const elbowY = Math.min(handY + elbowSpan, shoulderY - headRadius * 0.2);
+      const elbowSpan = Math.max(headRadius * 0.8, (shoulderY - handY) * 0.55);
+      const elbowY = Math.min(handY + elbowSpan, shoulderY - headRadius * 0.15);
       const elbowX = clamp(shoulderX + sign * elbowSwingX, leftBound, rightBound);
       const handX = clamp(shoulderX + sign * handSwingX, leftBound, rightBound);
 
@@ -316,8 +332,6 @@ export class Stickman {
       const hipX = cx + sign * (hipWidth / 2);
       const kneeX = clamp(hipX + sign * kneeOffsetX, leftBound, rightBound);
       const footX = clamp(hipX + sign * footOffsetX, leftBound, rightBound);
-      const kneeY = hipY + upperLeg;
-      const footY = floor;
 
       addUpperLeg(builder, side, {
         hipX,
@@ -347,10 +361,11 @@ export class Stickman {
       addAnkleJoint(builder, side);
     });
 
-    const { points, constraints, lines, names } = builder.build();
+    const { points, constraints, lines, hinges, names } = builder.build();
 
     this.points = points;
     this.constraints = constraints;
+    this.hinges = hinges;
     this.lines = lines;
 
     this.render = {
@@ -365,27 +380,31 @@ export class Stickman {
       kneeR: names.get('kneeR'),
       footL: names.get('footL'),
       footR: names.get('footR'),
-      face: {
-        eyeOffsetX: headRadius * 0.4,
-        eyeOffsetY: headRadius * 0.25,
-        eyeRadius: Math.max(1.5, headRadius * 0.12),
-        noseLength: Math.max(4, headRadius * 0.5),
-        noseThickness: Math.max(1, headRadius * 0.08),
-        mouthOffsetX: headRadius * 0.35,
-        mouthOffsetY: headRadius * 0.25,
-        mouthRadius: Math.max(4, headRadius * 0.75),
-        mouthThickness: Math.max(1, headRadius * 0.08),
-      },
     };
 
     this.bindPose = this.points.map((p) => ({ x: p.x, y: p.y }));
-    this.gravity = Math.max(6600, height * 330);
+    this.totalMass = this.points.reduce((sum, p) => sum + (p.mass || 0), 0);
+
+    const pixelsPerMeter = totalHeight / 1.8;
+    this.scale = pixelsPerMeter;
+    this.gravity = 9.81 * pixelsPerMeter;
+    this.airDrag = 0.992;
+    this.drag.stiffness = 0.62;
+    this.drag.damping = 0.55;
+    this.drag.index = -1;
+    this.drag.targetX = cx;
+    this.drag.targetY = torsoBottomY;
+    this.drag.pointerVX = 0;
+    this.drag.pointerVY = 0;
+    this.drag.lastX = cx;
+    this.drag.lastY = torsoBottomY;
+    this.drag.lastT = performance.now();
     this._cancelStand();
   }
 
   _integrate(dt) {
     const dragIndex = this.drag.index;
-    const damping = 0.993;
+    const damping = 0.998;
     const accelY = this.gravity;
     const dtSq = dt * dt;
 
@@ -405,35 +424,120 @@ export class Stickman {
     }
   }
 
+  _applyDrag(dt) {
+    const index = this.drag.index;
+    if (index === -1 || index >= this.points.length) {
+      return;
+    }
+    const p = this.points[index];
+    const stiffness = clamp(this.drag.stiffness, 0, 0.95);
+    const damping = clamp(this.drag.damping, 0, 1);
+    const prevVX = p.x - p.px;
+    const prevVY = p.y - p.py;
+    const nx = p.x + (this.drag.targetX - p.x) * stiffness;
+    const ny = p.y + (this.drag.targetY - p.y) * stiffness;
+    const desiredVX = this.drag.pointerVX * dt;
+    const desiredVY = this.drag.pointerVY * dt;
+    const newVX = lerp(prevVX, desiredVX, damping);
+    const newVY = lerp(prevVY, desiredVY, damping);
+    p.x = nx;
+    p.y = ny;
+    p.px = p.x - newVX;
+    p.py = p.y - newVY;
+  }
+
   _solveConstraints() {
     const iterations = 9;
     for (let iter = 0; iter < iterations; iter++) {
-      for (const constraint of this.constraints) {
-        const a = this.points[constraint.i];
-        const b = this.points[constraint.j];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const dist = Math.hypot(dx, dy) || 1e-6;
-        const diff = (dist - constraint.length) / dist;
-        const stiffness = constraint.stiffness;
-        const invMassA = 1 / a.mass;
-        const invMassB = 1 / b.mass;
-        const sumInv = invMassA + invMassB;
-        if (sumInv === 0) {
-          continue;
-        }
-        const factor = diff * stiffness;
-        const offsetX = dx * factor;
-        const offsetY = dy * factor;
+      this._solveDistanceConstraints();
+      this._solveHingeConstraints();
+    }
+  }
 
-        if (this.drag.index !== constraint.i) {
-          a.x += offsetX * (invMassA / sumInv);
-          a.y += offsetY * (invMassA / sumInv);
-        }
-        if (this.drag.index !== constraint.j) {
-          b.x -= offsetX * (invMassB / sumInv);
-          b.y -= offsetY * (invMassB / sumInv);
-        }
+  _solveDistanceConstraints() {
+    for (const constraint of this.constraints) {
+      const a = this.points[constraint.i];
+      const b = this.points[constraint.j];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy) || 1e-6;
+      const diff = (dist - constraint.length) / dist;
+      const stiffness = constraint.stiffness;
+      const invMassA = 1 / a.mass;
+      const invMassB = 1 / b.mass;
+      const sumInv = invMassA + invMassB;
+      if (sumInv === 0) {
+        continue;
+      }
+      const factor = diff * stiffness;
+      const offsetX = dx * factor;
+      const offsetY = dy * factor;
+
+      if (this.drag.index !== constraint.i) {
+        a.x += offsetX * (invMassA / sumInv);
+        a.y += offsetY * (invMassA / sumInv);
+      }
+      if (this.drag.index !== constraint.j) {
+        b.x -= offsetX * (invMassB / sumInv);
+        b.y -= offsetY * (invMassB / sumInv);
+      }
+    }
+  }
+
+  _solveHingeConstraints() {
+    if (!this.hinges.length) {
+      return;
+    }
+    for (const hinge of this.hinges) {
+      const pivot = this.points[hinge.pivot];
+      const anchor = this.points[hinge.anchor];
+      const limb = this.points[hinge.limb];
+      const ax = anchor.x - pivot.x;
+      const ay = anchor.y - pivot.y;
+      const bx = limb.x - pivot.x;
+      const by = limb.y - pivot.y;
+      const lenA = Math.hypot(ax, ay);
+      const lenB = Math.hypot(bx, by);
+      if (lenA < 1e-6 || lenB < 1e-6) {
+        continue;
+      }
+      const angle = Math.atan2(ax * by - ay * bx, ax * bx + ay * by);
+      const relative = normalizeAngle(angle - hinge.rest);
+      let targetRelative = relative;
+      if (relative < hinge.min) {
+        targetRelative = hinge.min;
+      } else if (relative > hinge.max) {
+        targetRelative = hinge.max;
+      } else {
+        continue;
+      }
+
+      if (Math.abs(targetRelative - relative) < 1e-3) {
+        continue;
+      }
+
+      const baseAngle = Math.atan2(ay, ax);
+      const targetAngle = hinge.rest + targetRelative;
+      const desiredTheta = baseAngle + targetAngle;
+      const desiredX = pivot.x + Math.cos(desiredTheta) * lenB;
+      const desiredY = pivot.y + Math.sin(desiredTheta) * lenB;
+      const corrX = (desiredX - limb.x) * hinge.stiffness;
+      const corrY = (desiredY - limb.y) * hinge.stiffness;
+      const invPivot = 1 / pivot.mass;
+      const invLimb = 1 / limb.mass;
+      const invSum = invPivot + invLimb;
+      if (invSum === 0) {
+        continue;
+      }
+      const pivotFactor = invPivot / invSum;
+      const limbFactor = invLimb / invSum;
+      if (this.drag.index !== hinge.limb) {
+        limb.x += corrX * limbFactor;
+        limb.y += corrY * limbFactor;
+      }
+      if (this.drag.index !== hinge.pivot) {
+        pivot.x -= corrX * pivotFactor;
+        pivot.y -= corrY * pivotFactor;
       }
     }
   }

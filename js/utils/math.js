@@ -4,6 +4,16 @@ export function clamp(v, min, max) {
   return v < min ? min : v > max ? max : v;
 }
 
+export function normalizeAngle(angle) {
+  return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+export function signedAngle(ax, ay, bx, by) {
+  const dot = ax * bx + ay * by;
+  const det = ax * by - ay * bx;
+  return Math.atan2(det, dot);
+}
+
 export function distance(x1, y1, x2, y2) {
   const dx = x2 - x1;
   const dy = y2 - y1;

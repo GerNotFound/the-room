@@ -1,4 +1,4 @@
-import { distance } from '../utils/math.js';
+import { distance, signedAngle } from '../utils/math.js';
 
 export class SkeletonBuilder {
   constructor() {
@@ -6,6 +6,7 @@ export class SkeletonBuilder {
     this.nameToIndex = new Map();
     this.constraints = [];
     this.lines = [];
+    this.hinges = [];
   }
 
   addPoint(name, x, y, mass = 1) {
@@ -41,11 +42,27 @@ export class SkeletonBuilder {
     }
   }
 
+  addHinge(pivotName, anchorName, limbName, { min = -Math.PI, max = Math.PI, stiffness = 0.35 } = {}) {
+    const pivotIndex = this.indexOf(pivotName);
+    const anchorIndex = this.indexOf(anchorName);
+    const limbIndex = this.indexOf(limbName);
+    const pivot = this.points[pivotIndex];
+    const anchor = this.points[anchorIndex];
+    const limb = this.points[limbIndex];
+    const ax = anchor.x - pivot.x;
+    const ay = anchor.y - pivot.y;
+    const bx = limb.x - pivot.x;
+    const by = limb.y - pivot.y;
+    const rest = signedAngle(ax, ay, bx, by);
+    this.hinges.push({ pivot: pivotIndex, anchor: anchorIndex, limb: limbIndex, rest, min, max, stiffness });
+  }
+
   build() {
     return {
       points: this.points,
       constraints: this.constraints,
       lines: this.lines,
+      hinges: this.hinges,
       names: this.nameToIndex,
     };
   }

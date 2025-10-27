@@ -111,7 +111,7 @@ function speakAt(x, y) {
   const line = list[Math.floor(Math.random() * list.length)] || DEFAULT_PHRASES[0];
   state.msg = {
     text: line,
-    until: performance.now() + 2600,
+    until: performance.now() + 5200,
     x,
     y,
   };
